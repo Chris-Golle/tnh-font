@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glyph Mixer</title>
+<style>
+  :root { --bg:#faf8f4; --ink:#1b2328; --muted:#8a8a8a; --line:#e6e1d8; --accent:#c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16191b; --ink:#ece8e1; --muted:#8d9399; --line:#2b3034; --accent:#fb923c; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-weight:500; font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; }
+  .controls { display:flex; flex-wrap:wrap; gap:12px 20px; align-items:end; margin-bottom:16px; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  input, select { font:inherit; color:var(--ink); background:transparent; border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+  input[type=text] { min-width:220px; }
+  .stage { border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:12px 0; overflow-x:auto; }
+  .stage svg { display:block; }
+  h2 { font-size:13px; font-weight:500; color:var(--muted); margin:28px 0 8px; text-transform:uppercase; letter-spacing:.06em; }
+  .letter { margin-bottom:18px; }
+  .letter .row { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { border:1px solid var(--line); border-radius:8px; padding:6px; cursor:pointer; background:transparent; color:var(--ink); }
+  .chip[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .chip svg { display:block; margin:0 auto; }
+  .chip span { display:block; font-size:11px; color:var(--muted); text-align:center; }
+  .fam { display:grid; grid-template-columns:120px 1fr; gap:4px 12px; align-items:center; }
+  .fam button { font:inherit; font-size:13px; text-align:left; border:0; background:none; color:var(--accent); cursor:pointer; padding:0; }
+  .fam svg { display:block; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Glyph mixer</h1>
+  <p class="sub">Pick one variant per letter and type a word. Only the letters extracted so far can be shown.</p>
+  <div class="controls">
+    <label>Word <input id="word" type="text" value="Bac"></label>
+    <label>Letter spacing <input id="track" type="range" min="-200" max="100" step="5"></label>
+    <label><span><input id="guides" type="checkbox" checked> baseline</span></label>
+  </div>
+  <div class="stage" id="stage"></div>
+  <h2>Families</h2>
+  <div class="fam" id="fams"></div>
+  <h2>Variants</h2>
+  <div id="letters"></div>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const FAMILIES = /*FAMILIES*/null;
+let track = /*TRACK*/0;
+const pick = {};
+for (const l in DATA) pick[l] = 0;
+let lsKey = 'tnh-mixer';
+try { Object.assign(pick, JSON.parse(localStorage.getItem(lsKey) || '{}').pick || {}); } catch (e) {}
+
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+
+function wordSVG(word, sel, guides, h = 220) {
+  let x = 0, paths = '';
+  for (const ch of word) {
+    const v = DATA[ch] && DATA[ch][sel[ch] ?? 0];
+    if (!v) { x += 300; continue; }
+    paths += `<path transform="translate(${x},0)" d="${v.d}" fill="currentColor"/>`;
+    x += v.w + track;
+  }
+  const w = Math.max(x - track, 10);
+  const g = guides ? `<line x1="0" x2="${w}" y1="750" y2="750" stroke="#e0306a" stroke-opacity=".35" stroke-width="3"/>
+    <line x1="0" x2="${w}" y1="300" y2="300" stroke="#2a8bd6" stroke-opacity=".25" stroke-width="3"/>` : '';
+  return `<svg xmlns="${NS}" viewBox="0 -20 ${w} 1080" width="${w * h / 1080}" height="${h}">${g}${paths}</svg>`;
+}
+
+function render() {
+  const word = $('word').value || 'Bac';
+  $('stage').innerHTML = wordSVG(word, pick, $('guides').checked);
+  $('fams').innerHTML = '';
+  for (const [name, sel] of Object.entries(FAMILIES)) {
+    const idx = {};
+    for (const l in sel) idx[l] = DATA[l].findIndex(v => v.name.startsWith(sel[l]));
+    const b = document.createElement('button');
+    b.textContent = name;
+    b.onclick = () => { Object.assign(pick, idx); save(); render(); };
+    const d = document.createElement('div');
+    d.innerHTML = wordSVG(word, idx, false, 70);
+    $('fams').append(b, d);
+  }
+  const L = $('letters'); L.innerHTML = '';
+  for (const l in DATA) {
+    const box = document.createElement('div'); box.className = 'letter';
+    const row = document.createElement('div'); row.className = 'row';
+    DATA[l].forEach((v, i) => {
+      const c = document.createElement('button'); c.className = 'chip';
+      c.title = v.note; c.setAttribute('aria-pressed', pick[l] === i);
+      c.innerHTML = `<svg xmlns="${NS}" viewBox="0 -20 ${v.w} 1080" width="${v.w * 70 / 1080}" height="70"><path d="${v.d}" fill="currentColor"/></svg><span>${v.name.slice(0, 4)}</span>`;
+      c.onclick = () => { pick[l] = i; save(); render(); };
+      row.append(c);
+    });
+    box.append(row); L.append(box);
+  }
+}
+function save() { try { localStorage.setItem(lsKey, JSON.stringify({ pick })); } catch (e) {} }
+$('track').value = track;
+$('track').oninput = e => { track = +e.target.value; render(); };
+$('word').oninput = render;
+$('guides').onchange = render;
+render();
+</script>
+</body>
+</html>
